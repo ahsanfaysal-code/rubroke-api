@@ -1,0 +1,106 @@
+generator client {
+  provider = "sqlite"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("user")
+  createdAt DateTime @default(now())
+}
+
+model Story {
+  id              Int      @id @default(autoincrement())
+  title           String
+  fullName        String
+  email           String
+  country         String
+  city            String
+  phone           String?
+  linkedin        String?
+  businessName    String
+  businessType    String
+  businessStage   String
+  website         String?
+  problem         String
+  helpNeeded      String   // stored as JSON string or comma separated
+  detailedStory   String
+  status          String   @default("pending") // pending, approved, rejected
+  trustScore      Int      @default(0)
+  fundingNeeded   Float    @default(0)
+  fundingRaised   Float    @default(0)
+  employees       Int      @default(1)
+  monthlyRevenue  Float    @default(0)
+  monthlyProfit   Float    @default(0)
+  yearsActive     String   @default("0")
+  createdAt       DateTime @default(now())
+  
+  // Verification flags
+  confirmAccurate Boolean  @default(false)
+  confirmTerms    Boolean  @default(false)
+  confirmPublish  Boolean  @default(false)
+
+  supporters      Supporter[]
+  pledges         Pledge[]
+}
+
+model Supporter {
+  id        Int      @id @default(autoincrement())
+  storyId   Int
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  name      String
+  role      String   @default("Supporter")
+  message   String
+  upvotes   Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Pledge {
+  id            Int      @id @default(autoincrement())
+  storyId       Int
+  story         Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  name          String
+  email         String
+  amount        Float
+  message       String?
+  status        String   @default("pending") // pending, completed
+  stripeSession String?
+  createdAt     DateTime @default(now())
+}
+
+model WhyBroke {
+  id               Int      @id @default(autoincrement())
+  name             String
+  email            String
+  whatsapp         String?
+  businessType     String
+  businessDuration String
+  location         String?
+  problem          String
+  whyBroke         String
+  needs            String
+  createdAt        DateTime @default(now())
+}
+
+model Subscriber {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  source    String   @default("footer")
+  createdAt DateTime @default(now())
+}
+
+model SiteSettings {
+  id                Int      @id @default(1)
+  maintenanceMode   Boolean  @default(false)
+  maintenanceMessage String  @default("We're making improvements. Be back soon.")
+  adminEmail        String   @default("support@rubroke.com")
+  siteNotice        String   @default("")
+  updatedAt         DateTime @updatedAt
+}

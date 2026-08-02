@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Local database (SQLite dev)
+*.db
+dev.db
+prisma/dev.db
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store

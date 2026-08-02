@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: rubroke-api
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: "node scripts/switch-db.js && npm install && npx prisma generate && npx prisma db push --skip-generate --accept-data-loss && node scripts/seed-admin.js"
+    startCommand: "npm run start"
+    healthCheckPath: "/api/health"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: PRISMA_PROVIDER
+        value: postgresql
+      - key: DATABASE_URL
+        fromService:
+          type: postgres
+          name: rubroke-db
+          property: connectionString
+      - key: ADMIN_EMAIL
+        value: admin@rubroke.com
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CLIENT_ORIGINS
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: APP_URL
+        sync: false
+    addons:
+      - type: postgres
+        name: rubroke-db
+        plan: free
+        databaseName: rubroke
+        user: rubroke
+        password: rubroke
