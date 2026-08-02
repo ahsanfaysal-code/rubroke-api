@@ -1,8 +1,6 @@
-// Rewrites ONLY the Prisma DATASOURCE provider based on PRISMA_PROVIDER, or
-// auto-detects from DATABASE_URL. The generator provider (prisma-client-js)
-// is left completely untouched. Used at build time on the host.
-// - local dev: DATABASE_URL is a file/sqlite path and PRISMA_PROVIDER unset -> sqlite
-// - Render/prod: DATABASE_URL is a postgres:// URL -> postgresql (unless PRISMA_PROVIDER overrides)
+// Rewrites ONLY the Prisma DATASOURCE provider. The repo is committed with
+// "postgresql" (production target). Locally we flip it to "sqlite" only when
+// DATABASE_URL is a local file (sqlite) URL. Used at build/start time on host.
 const fs = require('fs');
 const path = require('path');
 
@@ -11,17 +9,18 @@ const envProvider = (process.env.PRISMA_PROVIDER || '').toLowerCase().trim();
 let provider = envProvider;
 if (!provider) {
   const dbUrl = process.env.DATABASE_URL || '';
-  if (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://')) {
-    provider = 'postgresql';
-  } else {
+  // Local dev with a sqlite file -> use sqlite; everything else -> postgresql.
+  if (dbUrl.startsWith('file:') || dbUrl.startsWith('sqlite:')) {
     provider = 'sqlite';
+  } else {
+    provider = 'postgresql';
   }
 }
 
 const allowed = new Set(['sqlite', 'postgresql', 'mysql', 'sqlserver']);
 if (!allowed.has(provider)) {
-  console.error(`Invalid provider "${provider}". Defaulting to sqlite.`);
-  provider = 'sqlite';
+  console.error(`Invalid provider "${provider}". Defaulting to postgresql.`);
+  provider = 'postgresql';
 }
 
 const schemaPath = path.join(__dirname, '..', 'prisma', 'schema.prisma');
@@ -41,10 +40,9 @@ if (end === -1) {
 }
 
 const before = schema.slice(0, start);
-const block = schema.slice(start, end); // from "datasource db {" up to just before "}"
-const after = schema.slice(end);        // starting at "}"
+const block = schema.slice(start, end);
+const after = schema.slice(end);
 
-// Replace provider= inside this block only.
 if (!/provider\s*=\s*"/.test(block)) {
   console.error('No provider line found inside datasource block. Aborting.');
   process.exit(1);

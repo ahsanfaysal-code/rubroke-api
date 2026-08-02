@@ -4,8 +4,8 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: "node scripts/switch-db.js && npm install && npx prisma generate && npx prisma db push --skip-generate --accept-data-loss && node scripts/seed-admin.js"
-    startCommand: "npm run start"
+    buildCommand: "node scripts/switch-db.js && npm install && npx prisma generate"
+    startCommand: "node scripts/start.js"
     healthCheckPath: "/api/health"
     envVars:
       - key: NODE_ENV
