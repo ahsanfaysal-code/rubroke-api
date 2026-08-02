@@ -1,7 +1,7 @@
 // Production entrypoint used by Render's startCommand.
 // 1) Sync the database schema (creates tables if missing)
 // 2) Seed the admin account if it doesn't exist
-// 3) Start the Express server
+// 3) Start the Express server (bind 0.0.0.0 so Render can reach it)
 const { execSync } = require('child_process');
 const path = require('path');
 
@@ -22,5 +22,9 @@ try {
   console.error('seed-admin failed; continuing.');
 }
 
-// Start the actual server (src/index.js listens on PORT).
-require('../src/index.js');
+// Import the Express app and start listening.
+const app = require('../src/index.js');
+const port = process.env.PORT || 10000;
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`);
+});
