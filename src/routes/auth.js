@@ -4,11 +4,12 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { authenticateToken } = require('../middleware/auth');
+const { verifyTurnstile } = require('../middleware/turnstile');
 
 // POST /api/auth/register
-router.post('/register', async (req, res) => {
+router.post('/register', verifyTurnstile, async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, turnstileToken } = req.body;
 
     if (!email || !password || !name) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
@@ -43,9 +44,9 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', verifyTurnstile, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, turnstileToken } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
