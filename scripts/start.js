@@ -1,7 +1,6 @@
 // Production entrypoint used by Render's startCommand.
-// 1) Sync the database schema (creates tables if missing)
-// 2) Seed the admin account if it doesn't exist
-// 3) Start the Express server (bind 0.0.0.0 so Render can reach it)
+// The database schema must be migrated before this command runs.
+// This script only verifies the required admin bootstrap configuration and starts the API.
 const { execSync } = require('child_process');
 const path = require('path');
 
@@ -11,15 +10,10 @@ function run(cmd) {
 }
 
 try {
-  run('npx prisma db push --skip-generate --accept-data-loss');
-} catch (e) {
-  console.error('prisma db push failed; continuing to start server anyway.');
-}
-
-try {
   run('node scripts/seed-admin.js');
 } catch (e) {
-  console.error('seed-admin failed; continuing.');
+  console.error('seed-admin failed; refusing to start.');
+  process.exit(1);
 }
 
 // Import the Express app and start listening.

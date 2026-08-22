@@ -29,6 +29,7 @@ const whyBrokeRoutes = require('./routes/whybroke');
 const adminRoutes = require('./routes/admin');
 const subscribersRoutes = require('./routes/subscribers');
 const settingsRoutes = require('./routes/settings');
+const aiRoutes = require('./routes/ai');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/stories', storiesRoutes);
@@ -36,6 +37,7 @@ app.use('/api/why-broke', whyBrokeRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/subscribers', subscribersRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Basic health check
 app.get('/api/health', (req, res) => {

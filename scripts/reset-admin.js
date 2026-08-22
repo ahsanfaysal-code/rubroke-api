@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const readline = require('readline');
 
 const prisma = new PrismaClient();
-const EMAIL = 'admin@rubroke.com';
+const EMAIL = process.env.ADMIN_EMAIL;
 
 function askPassword() {
   return new Promise((resolve) => {
@@ -21,9 +21,12 @@ function askPassword() {
 }
 
 async function main() {
+  if (!EMAIL) {
+    throw new Error('ADMIN_EMAIL must be configured to reset an admin password.');
+  }
   const admin = await prisma.user.findUnique({ where: { email: EMAIL } });
   if (!admin) {
-    console.error(`No admin found with email ${EMAIL}. Run makeAdmin first.`);
+    console.error('No matching admin account found. Run makeAdmin first.');
     process.exit(1);
   }
   const password = await askPassword();

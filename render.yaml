@@ -5,6 +5,7 @@ services:
     plan: free
     branch: main
     buildCommand: "node scripts/switch-db.js && npm install && npx prisma generate"
+    preDeployCommand: "npx prisma db push --accept-data-loss"
     startCommand: "node scripts/start.js"
     healthCheckPath: "/api/health"
     envVars:
@@ -15,12 +16,11 @@ services:
       - key: PRISMA_PROVIDER
         value: postgresql
       - key: DATABASE_URL
-        fromService:
-          type: postgres
+        fromDatabase:
           name: rubroke-db
           property: connectionString
       - key: ADMIN_EMAIL
-        value: admin@rubroke.com
+        sync: false
       - key: ADMIN_PASSWORD
         sync: false
       - key: CLIENT_ORIGINS
@@ -35,10 +35,11 @@ services:
         sync: false
       - key: APP_URL
         sync: false
-    addons:
+      - key: GEMINI_API_KEY
+        sync: false
+    databases:
       - type: postgres
         name: rubroke-db
         plan: free
         databaseName: rubroke
         user: rubroke
-        password: rubroke

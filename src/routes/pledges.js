@@ -99,22 +99,4 @@ router.post('/', async (req, res) => {
   }
 });
 
-// POST /api/stories/:storyId/pledges/:id/confirm
-// Confirms a pending pledge (called by the client after Stripe redirect, or by a webhook in prod).
-router.post('/:id/confirm', async (req, res) => {
-  try {
-    const storyId = parseInt(req.params.storyId);
-    const id = parseInt(req.params.id);
-    const pledge = await prisma.pledge.update({
-      where: { id },
-      data: { status: 'completed' },
-    });
-    const raised = await recomputeRaised(storyId);
-    res.json({ success: true, data: pledge, fundingRaised: raised });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
 module.exports = router;

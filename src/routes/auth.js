@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { randomBytes } = require('crypto');
 const prisma = require('../lib/prisma');
 const { authenticateToken } = require('../middleware/auth');
 const { verifyTurnstile } = require('../middleware/turnstile');
@@ -54,7 +55,7 @@ router.post('/register', authLimiter, verifyTurnstile, async (req, res) => {
       user: { id: user.id, email: user.email, name: user.name, role: user.role }
     });
   } catch (error) {
-    console.error(error);
+    console.error('Registration failed');
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -86,7 +87,7 @@ router.post('/login', authLimiter, verifyTurnstile, async (req, res) => {
       user: { id: user.id, email: user.email, name: user.name, role: user.role }
     });
   } catch (error) {
-    console.error(error);
+    console.error('Login failed');
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -98,7 +99,7 @@ if (GOOGLE_CLIENT_ID) {
   try {
     OAuth2Client = require('google-auth-library').OAuth2Client;
   } catch (e) {
-    console.warn('google-auth-library not installed; Google login will be decode-only (dev).');
+    console.error('google-auth-library is unavailable; Google login is disabled.');
   }
 }
 
@@ -107,30 +108,24 @@ router.post('/google-login', authLimiter, async (req, res) => {
   try {
     const { credential } = req.body;
     if (!credential) return res.status(400).json({ success: false, message: 'Missing credential' });
-
-    let payload;
-    if (OAuth2Client) {
-      // Verify signature + audience against our real client ID.
-      const client = new OAuth2Client(GOOGLE_CLIENT_ID);
-      const ticket = await client.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
-      payload = ticket.getPayload();
-    } else {
-      // Dev/placeholder fallback: decode without verifying (NOT for production).
-      const base64Url = credential.split('.')[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join(''));
-      payload = JSON.parse(jsonPayload);
+    if (!GOOGLE_CLIENT_ID || !OAuth2Client) {
+      return res.status(503).json({ success: false, message: 'Google login is not configured' });
     }
 
+    // Verify signature and audience against the configured client ID.
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload();
+
     const email = payload.email;
+    if (!email || payload.email_verified !== true) {
+      return res.status(400).json({ success: false, message: 'Invalid token' });
+    }
     const name = payload.name || email.split('@')[0];
-    if (!email) return res.status(400).json({ success: false, message: 'Invalid token' });
 
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      const randomPassword = Math.random().toString(36).slice(-8);
+      const randomPassword = randomBytes(32).toString('base64url');
       const hashedPassword = await bcrypt.hash(randomPassword, 10);
       user = await prisma.user.create({
         data: { email, password: hashedPassword, name },
@@ -142,11 +137,11 @@ router.post('/google-login', authLimiter, async (req, res) => {
     res.json({
       success: true,
       token,
-      verified: !!OAuth2Client, // true once a real GOOGLE_CLIENT_ID is configured
+      verified: true,
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
     });
   } catch (error) {
-    console.error(error);
+    console.error('Google login verification failed');
     res.status(401).json({ success: false, message: 'Google token verification failed' });
   }
 });

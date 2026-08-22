@@ -2,10 +2,16 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
+const email = process.env.ADMIN_EMAIL;
+const password = process.env.ADMIN_PASSWORD;
 
 async function main() {
-  const email = 'admin@rubroke.com';
-  const password = 'admin'; // simple for dev
+  if (!email || !password) {
+    throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be configured to create an admin account.');
+  }
+  if (password.length < 12) {
+    throw new Error('ADMIN_PASSWORD must be at least 12 characters long.');
+  }
   
   const existingAdmin = await prisma.user.findUnique({ where: { email } });
   
@@ -25,7 +31,7 @@ async function main() {
     },
   });
 
-  console.log('Admin user created: admin@rubroke.com / admin');
+  console.log('Admin account created.');
 }
 
 main()
