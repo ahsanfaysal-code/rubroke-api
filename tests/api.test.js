@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
+import bcrypt from 'bcryptjs';
+import { randomBytes, randomUUID } from 'node:crypto';
 import app from '../src/index.js';
 import prisma from '../src/lib/prisma.js';
 
 // These tests hit the real app + dev SQLite DB. We clean up the rows we create.
 const createdStoryIds = [];
+const testAdminEmail = `security-test-${randomUUID()}@example.invalid`;
+const testAdminPassword = randomBytes(24).toString('base64url');
+const testUserEmail = `story-test-${randomUUID()}@example.invalid`;
+const testUserPassword = randomBytes(24).toString('base64url');
+let userToken = '';
 
 async function cleanup() {
   for (const id of createdStoryIds) {
@@ -12,9 +19,32 @@ async function cleanup() {
     await prisma.story.delete({ where: { id } }).catch(() => {});
   }
   await prisma.whyBroke.deleteMany({ where: { email: 'test-suite@example.com' } }).catch(() => {});
+  await prisma.user.delete({ where: { email: testAdminEmail } }).catch(() => {});
+  await prisma.user.delete({ where: { email: testUserEmail } }).catch(() => {});
 }
 
-beforeAll(async () => { await cleanup(); });
+beforeAll(async () => {
+  await cleanup();
+  await prisma.user.create({
+    data: {
+      name: 'Security Test Administrator',
+      email: testAdminEmail,
+      password: await bcrypt.hash(testAdminPassword, 10),
+      role: 'admin',
+    },
+  });
+  // A normal (non-admin) user used to exercise authenticated story submission.
+  await prisma.user.create({
+    data: {
+      name: 'Story Author',
+      email: testUserEmail,
+      password: await bcrypt.hash(testUserPassword, 10),
+      role: 'user',
+    },
+  });
+  const login = await request(app).post('/api/auth/login').send({ email: testUserEmail, password: testUserPassword });
+  userToken = login.body.token;
+});
 afterAll(async () => { await cleanup(); await prisma.$disconnect(); });
 
 const storyPayload = {
@@ -50,8 +80,8 @@ describe('Auth', () => {
     expect(res.body.success).toBe(false);
   });
 
-  it('admin login yields a token', async () => {
-    const res = await request(app).post('/api/auth/login').send({ email: 'admin@rubroke.com', password: 'admin' });
+  it('configured admin login yields a token', async () => {
+    const res = await request(app).post('/api/auth/login').send({ email: testAdminEmail, password: testAdminPassword });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.token).toBeTruthy();
@@ -60,13 +90,18 @@ describe('Auth', () => {
 });
 
 describe('Stories', () => {
+  it('rejects unauthenticated submission (401)', async () => {
+    const res = await request(app).post('/api/stories').send(storyPayload);
+    expect(res.status).toBe(401);
+  });
+
   it('rejects submission missing required fields (400)', async () => {
-    const res = await request(app).post('/api/stories').send({ fullName: 'X', email: 'x@y.com' });
+    const res = await request(app).post('/api/stories').set('Authorization', `Bearer ${userToken}`).send({ fullName: 'X', email: 'x@y.com' });
     expect(res.status).toBe(400);
   });
 
-  it('accepts a public submission with title + helpNeeded', async () => {
-    const res = await request(app).post('/api/stories').send(storyPayload);
+  it('accepts an authenticated submission with title + helpNeeded', async () => {
+    const res = await request(app).post('/api/stories').set('Authorization', `Bearer ${userToken}`).send(storyPayload);
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(res.body.id).toBeTruthy();
@@ -97,7 +132,7 @@ describe('Stories', () => {
   });
 
   it('admin can approve; approved story becomes public', async () => {
-    const login = await request(app).post('/api/auth/login').send({ email: 'admin@rubroke.com', password: 'admin' });
+    const login = await request(app).post('/api/auth/login').send({ email: testAdminEmail, password: testAdminPassword });
     const token = login.body.token;
     const id = createdStoryIds[0];
     const upd = await request(app).put(`/api/stories/${id}`).set('Authorization', `Bearer ${token}`).send({ status: 'approved' });
@@ -169,7 +204,7 @@ describe('Why-Broke', () => {
 
 describe('Admin (support + funding)', () => {
   async function adminToken() {
-    const login = await request(app).post('/api/auth/login').send({ email: 'admin@rubroke.com', password: 'admin' });
+    const login = await request(app).post('/api/auth/login').send({ email: testAdminEmail, password: testAdminPassword });
     return login.body.token;
   }
 
@@ -208,3 +243,10 @@ describe('Stripe webhook (unconfigured)', () => {
   });
 });
 
+describe('Pledge confirmation', () => {
+  it('does not expose a public confirmation route', async () => {
+    const id = createdStoryIds[0];
+    const res = await request(app).post(`/api/stories/${id}/pledges/1/confirm`).send({});
+    expect(res.status).toBe(404);
+  });
+});

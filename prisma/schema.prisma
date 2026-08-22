@@ -14,6 +14,7 @@ model User {
   name      String
   role      String   @default("user")
   createdAt DateTime @default(now())
+  stories   Story[]
 }
 
 model Story {
@@ -41,7 +42,12 @@ model Story {
   monthlyProfit   Float    @default(0)
   yearsActive     String   @default("0")
   createdAt       DateTime @default(now())
-  
+
+  // Optional author link (set when an authenticated user submits).
+  // Nullable so pre-existing/anonymous submissions remain valid.
+  authorId        Int?
+  author          User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
   // Verification flags
   confirmAccurate Boolean  @default(false)
   confirmTerms    Boolean  @default(false)

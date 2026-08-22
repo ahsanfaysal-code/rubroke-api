@@ -2,8 +2,17 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { createRateLimiter } = require('../middleware/rateLimit');
 const supportersRoutes = require('./supporters');
 const pledgesRoutes = require('./pledges');
+
+// Story creation is authenticated; throttle it to blunt automated spam submissions.
+// 5 per 15 minutes per IP is enough for genuine users (who must also be logged in).
+const storyCreateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'You are submitting stories too quickly. Please wait a few minutes.',
+});
 
 // Nested sub-resources (public community support + funding)
 router.use('/:storyId/supporters', supportersRoutes);
@@ -79,8 +88,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/stories (public submission from the "Share Your Story" wizard)
-router.post('/', async (req, res) => {
+// POST /api/stories (authenticated submission from the "Share Your Story" wizard)
+router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
   try {
     const {
       title,
@@ -130,7 +139,9 @@ router.post('/', async (req, res) => {
         confirmTerms: confirmTerms === true || confirmTerms === 'true',
         confirmPublish: confirmPublish === true || confirmPublish === 'true',
         fundingNeeded: parseFloat(fundingNeeded) || 0,
-        employees: parseInt(employees) || 1
+        employees: parseInt(employees) || 1,
+        // Ownership: always derived from the verified token, never the request body.
+        authorId: req.user?.id ?? null,
       }
     });
     res.status(201).json({ success: true, id: story.id, message: 'Story submitted successfully' });

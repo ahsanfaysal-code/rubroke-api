@@ -4,6 +4,10 @@ require('dotenv').config();
 
 const app = express();
 
+// Trust the first proxy hop (Render's load balancer) so req.ip reflects the
+// real client IP rather than the proxy. Required for per-IP rate limiting.
+app.set('trust proxy', 1);
+
 // Middleware — restrict CORS to configured origins (defaults to localhost for dev).
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || 'http://localhost:4000').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({ origin: CLIENT_ORIGINS, credentials: true }));

@@ -5,14 +5,30 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { authenticateToken } = require('../middleware/auth');
 const { verifyTurnstile } = require('../middleware/turnstile');
+const { createRateLimiter } = require('../middleware/rateLimit');
+
+// Minimum password length — matches the frontend's current requirement.
+const MIN_PASSWORD_LENGTH = 6;
+
+// Auth endpoints are throttled to blunt brute-force / credential-stuffing.
+// 10 attempts per 15-minute window per IP is generous for normal users.
+const authLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many attempts. Please wait a few minutes and try again.',
+});
 
 // POST /api/auth/register
-router.post('/register', verifyTurnstile, async (req, res) => {
+router.post('/register', authLimiter, verifyTurnstile, async (req, res) => {
   try {
     const { email, password, name, turnstileToken } = req.body;
 
     if (!email || !password || !name) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
+    }
+
+    if (String(password).length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ success: false, message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -44,7 +60,7 @@ router.post('/register', verifyTurnstile, async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', verifyTurnstile, async (req, res) => {
+router.post('/login', authLimiter, verifyTurnstile, async (req, res) => {
   try {
     const { email, password, turnstileToken } = req.body;
 
@@ -87,7 +103,7 @@ if (GOOGLE_CLIENT_ID) {
 }
 
 // POST /api/auth/google-login
-router.post('/google-login', async (req, res) => {
+router.post('/google-login', authLimiter, async (req, res) => {
   try {
     const { credential } = req.body;
     if (!credential) return res.status(400).json({ success: false, message: 'Missing credential' });
