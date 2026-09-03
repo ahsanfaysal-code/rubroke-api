@@ -14,10 +14,8 @@ services:
         value: 10000
       - key: PRISMA_PROVIDER
         value: postgresql
-      - key: DATABASE_URL
-        fromDatabase:
-          name: rubroke-db
-          property: connectionString
+     - key: DATABASE_URL
+  sync: false
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
