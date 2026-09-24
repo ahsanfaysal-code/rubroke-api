@@ -1,10 +1,61 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin, optionalAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const supportersRoutes = require('./supporters');
 const pledgesRoutes = require('./pledges');
+
+// Public projection of a Story: excludes private founder PII (email, phone) and internal flags.
+const PUBLIC_STORY_SELECT = {
+  id: true,
+  title: true,
+  fullName: true,
+  country: true,
+  city: true,
+  businessName: true,
+  businessType: true,
+  businessStage: true,
+  website: true,
+  problem: true,
+  helpNeeded: true,
+  detailedStory: true,
+  status: true,
+  trustScore: true,
+  fundingNeeded: true,
+  fundingRaised: true,
+  employees: true,
+  monthlyRevenue: true,
+  monthlyExpenses: true,
+  monthlyProfit: true,
+  yearsActive: true,
+  createdAt: true,
+  authorId: true,
+};
+
+// Explicit whitelist of fields an administrator is permitted to modify on a Story.
+const ALLOWED_ADMIN_UPDATE_FIELDS = new Set([
+  'title',
+  'fullName',
+  'country',
+  'city',
+  'businessName',
+  'businessType',
+  'businessStage',
+  'website',
+  'problem',
+  'helpNeeded',
+  'detailedStory',
+  'status',
+  'trustScore',
+  'fundingNeeded',
+  'fundingRaised',
+  'employees',
+  'monthlyRevenue',
+  'monthlyExpenses',
+  'monthlyProfit',
+  'yearsActive',
+]);
 
 // Story creation is authenticated; throttle it to blunt automated spam submissions.
 // 5 per 15 minutes per IP is enough for genuine users (who must also be logged in).
@@ -19,14 +70,21 @@ router.use('/:storyId/supporters', supportersRoutes);
 router.use('/:storyId/pledges', pledgesRoutes);
 
 // GET /api/stories
-router.get('/', async (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
   try {
     const { status, search, businessType, businessStage, limit = 12, page = 1 } = req.query;
     
     let where = {};
-    if (status && status !== 'all') {
-      where.status = status;
-    } else if (!status) {
+    const isAdmin = req.user && req.user.role === 'admin';
+
+    // Status access control: non-admins are restricted strictly to approved stories
+    if (isAdmin) {
+      if (status && status !== 'all') {
+        where.status = status;
+      } else if (!status) {
+        where.status = 'approved';
+      }
+    } else {
       where.status = 'approved';
     }
 
@@ -49,7 +107,8 @@ router.get('/', async (req, res) => {
         where,
         skip,
         take,
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
+        select: isAdmin ? undefined : PUBLIC_STORY_SELECT,
       }),
       prisma.story.count({ where })
     ]);
@@ -70,16 +129,38 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/stories/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuth, async (req, res) => {
   try {
+    const storyId = parseInt(req.params.id);
+    if (isNaN(storyId)) {
+      return res.status(400).json({ success: false, message: 'Invalid story ID' });
+    }
+
     const story = await prisma.story.findUnique({
-      where: { id: parseInt(req.params.id) },
+      where: { id: storyId },
       include: {
         supporters: { orderBy: { createdAt: 'desc' } },
       },
     });
     
     if (!story) return res.status(404).json({ success: false, message: 'Story not found' });
+
+    const isAdmin = req.user && req.user.role === 'admin';
+    const isAuthor = req.user && story.authorId && req.user.id === story.authorId;
+
+    // Status access control: non-approved stories are accessible ONLY by admin or original author
+    if (story.status !== 'approved' && !isAdmin && !isAuthor) {
+      return res.status(404).json({ success: false, message: 'Story not found' });
+    }
+
+    // Public story PII protection: strip private contact and internal flags for general visitors
+    if (!isAdmin && !isAuthor) {
+      delete story.email;
+      delete story.phone;
+      delete story.confirmAccurate;
+      delete story.confirmTerms;
+      delete story.confirmPublish;
+    }
     
     res.json({ success: true, data: story });
   } catch (error) {
@@ -111,6 +192,10 @@ router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
       confirmPublish,
       fundingNeeded,
       employees,
+      monthlyRevenue,
+      monthlyExpenses,
+      monthlyProfit,
+      yearsActive,
     } = req.body;
 
     if (!title || !businessName || !email || !fullName) {
@@ -140,6 +225,9 @@ router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
         confirmPublish: confirmPublish === true || confirmPublish === 'true',
         fundingNeeded: parseFloat(fundingNeeded) || 0,
         employees: parseInt(employees) || 1,
+        monthlyRevenue: parseFloat(monthlyRevenue) || 0,
+        monthlyProfit: parseFloat(monthlyProfit) || 0,
+        yearsActive: yearsActive ? String(yearsActive).trim() : '0',
         // Ownership: always derived from the verified token, never the request body.
         authorId: req.user?.id ?? null,
       }
@@ -154,9 +242,30 @@ router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
 // PUT /api/stories/:id (Admin only)
 router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const storyId = parseInt(req.params.id);
+    if (isNaN(storyId)) {
+      return res.status(400).json({ success: false, message: 'Invalid story ID' });
+    }
+
+    // Explicit whitelist of allowed fields to prevent mass-assignment
+    const updateData = {};
+    for (const [key, value] of Object.entries(req.body || {})) {
+      if (ALLOWED_ADMIN_UPDATE_FIELDS.has(key)) {
+        if (key === 'helpNeeded' && Array.isArray(value)) {
+          updateData[key] = JSON.stringify(value);
+        } else {
+          updateData[key] = value;
+        }
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ success: false, message: 'No valid update fields provided' });
+    }
+
     const story = await prisma.story.update({
-      where: { id: parseInt(req.params.id) },
-      data: req.body
+      where: { id: storyId },
+      data: updateData,
     });
     res.json({ success: true, data: story });
   } catch (error) {

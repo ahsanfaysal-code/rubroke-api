@@ -16,11 +16,11 @@ let userToken = '';
 async function cleanup() {
   for (const id of createdStoryIds) {
     // Cascades to supporters + pledges via schema onDelete: Cascade
-    await prisma.story.delete({ where: { id } }).catch(() => {});
+    await prisma.story.delete({ where: { id } }).catch(() => { });
   }
-  await prisma.whyBroke.deleteMany({ where: { email: 'test-suite@example.com' } }).catch(() => {});
-  await prisma.user.delete({ where: { email: testAdminEmail } }).catch(() => {});
-  await prisma.user.delete({ where: { email: testUserEmail } }).catch(() => {});
+  await prisma.whyBroke.deleteMany({ where: { email: 'test-suite@example.com' } }).catch(() => { });
+  await prisma.user.delete({ where: { email: testAdminEmail } }).catch(() => { });
+  await prisma.user.delete({ where: { email: testUserEmail } }).catch(() => { });
 }
 
 beforeAll(async () => {
@@ -108,11 +108,21 @@ describe('Stories', () => {
     createdStoryIds.push(res.body.id);
   });
 
-  it('new stories are pending (hidden from public approved list)', async () => {
+  it('new stories are pending: hidden from public (404), accessible to author (200)', async () => {
     const id = createdStoryIds[0];
-    const res = await request(app).get(`/api/stories/${id}`);
-    expect(res.body.data.status).toBe('pending');
-    expect(res.body.data.title).toBe(storyPayload.title);
+    const unauthRes = await request(app).get(`/api/stories/${id}`);
+    expect(unauthRes.status).toBe(404);
+
+    const authorRes = await request(app).get(`/api/stories/${id}`).set('Authorization', `Bearer ${userToken}`);
+    expect(authorRes.status).toBe(200);
+    expect(authorRes.body.data.status).toBe('pending');
+    expect(authorRes.body.data.title).toBe(storyPayload.title);
+  });
+
+  it('public caller cannot bypass status filter via ?status=pending', async () => {
+    const list = await request(app).get('/api/stories?status=pending');
+    expect(list.status).toBe(200);
+    expect(list.body.data.every((s) => s.status === 'approved')).toBe(true);
   });
 
   it('blocks unauthenticated status update (401)', async () => {
@@ -131,7 +141,7 @@ describe('Stories', () => {
     expect([401, 500]).toContain(res.status);
   });
 
-  it('admin can approve; approved story becomes public', async () => {
+  it('admin can approve; approved story becomes public and hides PII', async () => {
     const login = await request(app).post('/api/auth/login').send({ email: testAdminEmail, password: testAdminPassword });
     const token = login.body.token;
     const id = createdStoryIds[0];
@@ -139,7 +149,31 @@ describe('Stories', () => {
     expect(upd.body.data.status).toBe('approved');
 
     const list = await request(app).get('/api/stories?status=approved');
-    expect(list.body.data.some(s => s.id === id)).toBe(true);
+    const pubStory = list.body.data.find((s) => s.id === id);
+    expect(pubStory).toBeTruthy();
+    expect(pubStory.email).toBeUndefined();
+    expect(pubStory.phone).toBeUndefined();
+
+    // GET /api/stories/:id for public caller must also omit PII
+    const single = await request(app).get(`/api/stories/${id}`);
+    expect(single.status).toBe(200);
+    expect(single.body.data.email).toBeUndefined();
+    expect(single.body.data.phone).toBeUndefined();
+    expect(single.body.data.confirmAccurate).toBeUndefined();
+  });
+
+  it('admin update ignores unauthorized mass-assignment fields (id, authorId)', async () => {
+    const login = await request(app).post('/api/auth/login').send({ email: testAdminEmail, password: testAdminPassword });
+    const token = login.body.token;
+    const id = createdStoryIds[0];
+    const res = await request(app)
+      .put(`/api/stories/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ id: 99999, authorId: 88888, title: 'Updated Safe Title' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.id).toBe(id);
+    expect(res.body.data.authorId).not.toBe(88888);
+    expect(res.body.data.title).toBe('Updated Safe Title');
   });
 });
 
@@ -248,5 +282,28 @@ describe('Pledge confirmation', () => {
     const id = createdStoryIds[0];
     const res = await request(app).post(`/api/stories/${id}/pledges/1/confirm`).send({});
     expect(res.status).toBe(404);
+  });
+});
+
+describe('Rate Limiter Cache-Busting Protection', () => {
+  it('aggregates hits by path and cannot be bypassed via query strings', () => {
+    const { createRateLimiter } = require('../src/middleware/rateLimit');
+    const limiter = createRateLimiter({ windowMs: 60000, max: 2 });
+    let blocked = false;
+    const req1 = { ip: '1.2.3.4', originalUrl: '/api/test?v=1' };
+    const req2 = { ip: '1.2.3.4', originalUrl: '/api/test?v=2' };
+    const req3 = { ip: '1.2.3.4', originalUrl: '/api/test?v=3' };
+    const res = {
+      set: () => { },
+      status: (code) => ({
+        json: () => {
+          if (code === 429) blocked = true;
+        },
+      }),
+    };
+    limiter(req1, res, () => { });
+    limiter(req2, res, () => { });
+    limiter(req3, res, () => { });
+    expect(blocked).toBe(true);
   });
 });

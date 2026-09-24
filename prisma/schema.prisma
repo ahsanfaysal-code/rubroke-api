@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -15,6 +15,21 @@ model User {
   role      String   @default("user")
   createdAt DateTime @default(now())
   stories   Story[]
+  savedCalculations SavedCalculation[]
+}
+
+model SavedCalculation {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  calculatorType String
+  inputData      String
+  resultData     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, createdAt])
 }
 
 model Story {
@@ -39,6 +54,7 @@ model Story {
   fundingRaised   Float    @default(0)
   employees       Int      @default(1)
   monthlyRevenue  Float    @default(0)
+  monthlyExpenses Float    @default(0)
   monthlyProfit   Float    @default(0)
   yearsActive     String   @default("0")
   createdAt       DateTime @default(now())
