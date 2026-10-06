@@ -1,10 +1,28 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const prisma = require('../lib/prisma');
 const { authenticateToken, requireAdmin, optionalAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const { uploadStoryImageToSupabase, isStorageConfigured } = require('../lib/supabaseStorage');
 const supportersRoutes = require('./supporters');
 const pledgesRoutes = require('./pledges');
+
+// Allowed image MIME types and multer in-memory upload handler (max 2 MB)
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2 MB
+    files: 1,
+  },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only JPG, PNG, and WebP are allowed.'));
+    }
+    cb(null, true);
+  },
+});
 
 // Public projection of a Story: excludes private founder PII (email, phone) and internal flags.
 const PUBLIC_STORY_SELECT = {
@@ -29,6 +47,7 @@ const PUBLIC_STORY_SELECT = {
   monthlyExpenses: true,
   monthlyProfit: true,
   yearsActive: true,
+  imageUrl: true,
   createdAt: true,
   authorId: true,
 };
@@ -55,6 +74,7 @@ const ALLOWED_ADMIN_UPDATE_FIELDS = new Set([
   'monthlyExpenses',
   'monthlyProfit',
   'yearsActive',
+  'imageUrl',
 ]);
 
 // Story creation is authenticated; throttle it to blunt automated spam submissions.
@@ -169,6 +189,39 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
+// POST /api/stories/upload-image (Authenticated single story image upload to Supabase Storage)
+router.post('/upload-image', authenticateToken, (req, res) => {
+  upload.single('image')(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, message: 'Image file size must be 2 MB or less.' });
+      }
+      return res.status(400).json({ success: false, message: `Upload error: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No image file provided.' });
+    }
+
+    if (!isStorageConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Supabase Storage is not configured on the server. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.',
+      });
+    }
+
+    try {
+      const imageUrl = await uploadStoryImageToSupabase(req.file, req.user.id);
+      return res.json({ success: true, imageUrl });
+    } catch (uploadError) {
+      console.error('Failed to upload image to Supabase Storage:', uploadError);
+      return res.status(500).json({ success: false, message: uploadError.message || 'Failed to upload image' });
+    }
+  });
+});
+
 // POST /api/stories (authenticated submission from the "Share Your Story" wizard)
 router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
   try {
@@ -196,10 +249,19 @@ router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
       monthlyExpenses,
       monthlyProfit,
       yearsActive,
+      imageUrl,
     } = req.body;
 
     if (!title || !businessName || !email || !fullName) {
       return res.status(400).json({ success: false, message: 'Title, business name, full name and email are required.' });
+    }
+
+    let validatedImageUrl = null;
+    if (imageUrl) {
+      if (typeof imageUrl !== 'string' || !/^https?:\/\//i.test(imageUrl.trim())) {
+        return res.status(400).json({ success: false, message: 'Invalid image URL format.' });
+      }
+      validatedImageUrl = imageUrl.trim();
     }
 
     const story = await prisma.story.create({
@@ -226,8 +288,10 @@ router.post('/', authenticateToken, storyCreateLimiter, async (req, res) => {
         fundingNeeded: parseFloat(fundingNeeded) || 0,
         employees: parseInt(employees) || 1,
         monthlyRevenue: parseFloat(monthlyRevenue) || 0,
+        monthlyExpenses: parseFloat(monthlyExpenses) || 0,
         monthlyProfit: parseFloat(monthlyProfit) || 0,
         yearsActive: yearsActive ? String(yearsActive).trim() : '0',
+        imageUrl: validatedImageUrl,
         // Ownership: always derived from the verified token, never the request body.
         authorId: req.user?.id ?? null,
       }

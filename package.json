@@ -18,12 +18,14 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@supabase/supabase-js": "^2.117.2",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "google-auth-library": "^10.9.0",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.4.0",
     "stripe": "^22.3.2"
   },
   "devDependencies": {

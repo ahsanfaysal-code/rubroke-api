@@ -57,6 +57,7 @@ model Story {
   monthlyExpenses Float    @default(0)
   monthlyProfit   Float    @default(0)
   yearsActive     String   @default("0")
+  imageUrl        String?
   createdAt       DateTime @default(now())
 
   // Optional author link (set when an authenticated user submits).
