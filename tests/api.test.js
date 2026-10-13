@@ -307,3 +307,56 @@ describe('Rate Limiter Cache-Busting Protection', () => {
     expect(blocked).toBe(true);
   });
 });
+
+describe('CORS configuration', () => {
+  it('allows http://localhost:4001 with credentials', async () => {
+    const res = await request(app)
+      .get('/api/settings')
+      .set('Origin', 'http://localhost:4001');
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:4001');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('allows http://localhost:4000 with credentials', async () => {
+    const res = await request(app)
+      .get('/api/settings')
+      .set('Origin', 'http://localhost:4000');
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:4000');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('allows production https://rubroke.com and https://www.rubroke.com', async () => {
+    const res1 = await request(app)
+      .get('/api/settings')
+      .set('Origin', 'https://rubroke.com');
+    expect(res1.headers['access-control-allow-origin']).toBe('https://rubroke.com');
+
+    const res2 = await request(app)
+      .get('/api/settings')
+      .set('Origin', 'https://www.rubroke.com');
+    expect(res2.headers['access-control-allow-origin']).toBe('https://www.rubroke.com');
+  });
+
+  it('handles OPTIONS preflight requests cleanly with 204 status', async () => {
+    const res = await request(app)
+      .options('/api/auth/register')
+      .set('Origin', 'http://localhost:4001')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'Content-Type,Authorization');
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:4001');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+    expect(res.headers['access-control-allow-methods']).toContain('POST');
+  });
+
+  it('does not send Access-Control-Allow-Origin for untrusted origins', async () => {
+    const res = await request(app)
+      .get('/api/settings')
+      .set('Origin', 'https://untrusted-malicious-site.example');
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+

@@ -8,9 +8,45 @@ const app = express();
 // real client IP rather than the proxy. Required for per-IP rate limiting.
 app.set('trust proxy', 1);
 
-// Middleware — restrict CORS to configured origins (defaults to localhost for dev).
-const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || 'http://localhost:4000').split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors({ origin: CLIENT_ORIGINS, credentials: true }));
+// Middleware — restrict CORS to allowed origins (production RuBroke domains and local dev ports).
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:4000',
+  'http://localhost:4001',
+  'http://127.0.0.1:4000',
+  'http://127.0.0.1:4001',
+  'https://rubroke.com',
+  'https://www.rubroke.com',
+];
+
+const envOrigins = (process.env.CLIENT_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+const allowedOriginsSet = new Set([
+  ...DEFAULT_ALLOWED_ORIGINS.map(s => s.replace(/\/+$/, '')),
+  ...envOrigins,
+]);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g. curl, server-to-server, same-origin, or test suites)
+      if (!origin) {
+        return callback(null, true);
+      }
+      const normalizedOrigin = origin.trim().replace(/\/+$/, '');
+      if (allowedOriginsSet.has(normalizedOrigin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    optionsSuccessStatus: 204,
+  })
+);
 
 // Stripe webhook must read the RAW body (before express.json) for signature verification.
 const stripeRoute = require('./routes/stripe');
